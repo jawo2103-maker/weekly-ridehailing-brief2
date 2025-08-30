@@ -140,8 +140,9 @@ def main():
     cov_start_disp, cov_end_disp = to_display(cov_start), to_display(cov_end)
     articles = fetch_news(cov_start_iso, cov_end_iso)  # [] is fine
     brief = chatgpt_brief(cov_start_disp, cov_end_disp, articles)
-  tg_send_text(brief.strip())
 
+# Send the whole brief as one Telegram message
+tg_send_text(brief.strip())
 
 if __name__ == "__main__":
     main()
