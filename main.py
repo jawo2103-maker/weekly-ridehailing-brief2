@@ -75,23 +75,23 @@ ARTICLES (JSON array):
 
 Output structure EXACTLY:
 
-### Title:
+Title:
 Weekly Competitor Brief — {coverage_end_disp}
 
-### Coverage Window:
+Coverage Window:
 {coverage_start_disp} – {coverage_end_disp}
 
-### Top 10
+Top 10
 Each item on two lines:
 News in one sentence — Source
 Link
 
-### Appendix
+Appendix
 Grouped by Company → Topic → Region. Each item on two lines:
 News in one sentence — Source
 Link
 
-### Trend Takeaway
+Trend Takeaway
 One sentence capturing the dominant theme of the week.
 
 Rules:
