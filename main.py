@@ -7,38 +7,38 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 NEWSAPI_KEY        = os.environ.get("NEWSAPI_KEY", "")  # optional
 
-# --- COMPANY QUERIES (used by RSS fallback) ---
-COMPANIES = [
-    ("Uber",    '"Uber" OR "Uber Technologies"'),
-    ("DiDi",    '"Didi Chuxing" OR "DiDi" OR 滴滴'),
-    ("Bolt",    '"Bolt" OR "Taxify"'),
-    ("inDrive", '"inDrive" OR "inDriver"'),
-    ("Cabify",  '"Cabify"'),
-    ("Yassir",  '"Yassir"'),
-    ("Heetch",  '"Heetch"'),
-    ("Grab",    '"Grab"'),
-    ("Gojek",   '"Gojek"'),
-]
+# --- COMPANIES & PATTERNS ---
+COMPANY_PATTERNS = {
+    "Uber":    [r"\buber\b", r"\buber technologies\b"],
+    "DiDi":    [r"\bdidi\b", r"\bdidi chuxing\b", r"滴滴", r"\b99 app\b", r"\b99\b"],
+    "Bolt":    [r"\bbolt\b", r"\btaxify\b"],
+    "inDrive": [r"\bindrive\b", r"\bindriver\b"],
+    "Cabify":  [r"\bcabify\b"],
+    "Yassir":  [r"\byassir\b"],
+    "Heetch":  [r"\bheetch\b"],
+    "Grab":    [r"\bgrab\b"],
+    "Gojek":   [r"\bgojek\b", r"\bgo-jek\b"],
+}
 
-# --- TIME / COVERAGE (Europe/Helsinki with DST awareness if possible) ---
+COMPANIES = list(COMPANY_PATTERNS.keys())
+
+# --- TIME / COVERAGE ---
 def helsinki_now():
     try:
         from zoneinfo import ZoneInfo
         return datetime.now(ZoneInfo("Europe/Helsinki"))
     except Exception:
-        # Fallback: UTC +3 (summer). Edit if you want +2 in winter manually.
         return datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(hours=3)
 
 def last_full_week_mon_sun(now_local: datetime):
     """
     Most recent FULL Monday–Sunday week BEFORE 'today' local date.
     If today is Monday, last week ended yesterday (Sunday).
-    If today is Sunday, we go back to previous Sunday (exclude today).
     """
     today = now_local.date()
-    wd = today.weekday()          # Mon=0..Sun=6
-    last_sun = today - timedelta(days=wd + 1)  # go back to previous Sunday
-    last_mon = last_sun - timedelta(days=6)    # Monday of that week
+    wd = today.weekday()  # Mon=0..Sun=6
+    last_sun = today - timedelta(days=wd + 1)
+    last_mon = last_sun - timedelta(days=6)
     return last_mon, last_sun
 
 def to_display(d): return d.strftime("%d/%m/%Y")
@@ -54,7 +54,7 @@ def fetch_news(from_iso: str, to_iso: str):
         '("Uber" OR "Uber Technologies" OR "DiDi" OR "Didi Chuxing" OR 滴滴 OR '
         '"Bolt" OR "Taxify" OR "inDrive" OR "inDriver" OR "Cabify" OR "Yassir" OR "Heetch") '
         'AND (ride OR driver OR mobility OR taxi OR regulation OR pricing OR safety OR expansion '
-        'OR partnership OR investment OR funding OR strike)'
+        'OR partnership OR investment OR funding OR strike OR launch OR city OR country)'
         ' OR ("Grab" OR "Gojek")'
     )
     params = {
@@ -64,7 +64,7 @@ def fetch_news(from_iso: str, to_iso: str):
         "searchIn": "title,description,content",
         "sortBy": "publishedAt",
         "pageSize": 100,
-        "language": "en",  # remove if you want multilingual from NewsAPI too
+        "language": "en",  # remove to allow multilingual NewsAPI
     }
     headers = {"X-Api-Key": NEWSAPI_KEY}
     r = requests.get(url, params=params, headers=headers, timeout=30)
@@ -86,31 +86,39 @@ def fetch_news(from_iso: str, to_iso: str):
         })
     return out
 
-# --- FETCH: Google News RSS (no key). Skips silently if feedparser missing. ---
+# --- FETCH: Google News RSS (optional, no key). Requires 'feedparser' in workflow. ---
 def fetch_google_news_rss(from_dt_utc, to_dt_utc):
     try:
         import feedparser  # type: ignore
     except Exception:
         return []
-
     results = []
-    # SEA-friendly locales first (SG/ID), then a general US/EN feed
+    # SEA-first; then global
     locales = [
-        ("en-SG", "SG"),   # Singapore
-        ("en-ID", "ID"),   # Indonesia
-        ("en-US", "US"),   # Global-ish
+        ("en-SG", "SG"),
+        ("en-ID", "ID"),
+        ("en-US", "US"),
     ]
     base = "https://news.google.com/rss/search?q={query}%20when:7d&hl={hl}&gl={gl}&ceid={gl}:{hl_code}"
-
-    for name, query in COMPANIES:
-        q_enc = requests.utils.quote(query)
+    # Build company queries
+    company_queries = [
+        '"Uber" OR "Uber Technologies"',
+        '"Didi Chuxing" OR "DiDi" OR 滴滴 OR "99 App" OR "99"',
+        '"Bolt" OR "Taxify"',
+        '"inDrive" OR "inDriver"',
+        '"Cabify"',
+        '"Yassir"',
+        '"Heetch"',
+        '"Grab"',
+        '"Gojek" OR "Go-Jek"',
+    ]
+    for q in company_queries:
+        q_enc = requests.utils.quote(q)
         for hl, gl in locales:
             hl_code = hl.split("-")[-1]
             url = base.format(query=q_enc, hl=hl, gl=gl, hl_code=hl_code)
             feed = feedparser.parse(url)
-
             for e in feed.entries:
-                # Published time
                 pub = None
                 if getattr(e, "published_parsed", None):
                     pub = datetime(*e.published_parsed[:6], tzinfo=timezone.utc)
@@ -118,16 +126,13 @@ def fetch_google_news_rss(from_dt_utc, to_dt_utc):
                     pub = datetime(*e.updated_parsed[:6], tzinfo=timezone.utc)
                 if not pub:
                     continue
-                # Filter to coverage window
                 if not (from_dt_utc <= pub <= to_dt_utc + timedelta(days=1)):
                     continue
-
                 link = (getattr(e, "link", "") or "").split("?")[0].rstrip("/")
                 title = (getattr(e, "title", "") or "").strip()
                 if not link or not title:
                     continue
-
-                # outlet name: try 'source.title', else domain fallback
+                # source
                 src = None
                 src_tag = getattr(e, "source", None)
                 if src_tag and hasattr(src_tag, "title"):
@@ -137,7 +142,6 @@ def fetch_google_news_rss(from_dt_utc, to_dt_utc):
                         src = link.split("/")[2]
                     except Exception:
                         src = "Source"
-
                 results.append({
                     "title": title,
                     "source": src,
@@ -145,11 +149,50 @@ def fetch_google_news_rss(from_dt_utc, to_dt_utc):
                     "url": link,
                     "description": "",
                 })
-            time.sleep(0.15)  # be polite
-
+            time.sleep(0.15)
     return results
 
-# --- MERGE / DEDUPE ---
+# --- CLASSIFY & FILTER ---
+VIOLENCE_BLACKLIST = [
+    "assault", "punched", "punch", "stab", "stabbing", "murder", "killed", "kill",
+    "rape", "sexual assault", "molest", "robbery", "beaten", "beating",
+]
+
+BUSINESS_WHITELIST = [
+    # preferences (not enforced hard filter, but the model will be steered)
+    "launch", "expansion", "expand", "opens", "opening", "enters", "entry", "rollout",
+    "city", "cities", "country", "countries", "region", "market",
+    "merger", "acquisition", "acquires", "m&a",
+    "funding", "raises", "raise", "investment", "invests", "round",
+    "partnership", "partners", "alliance", "collaboration",
+    "ipo", "listing", "valuation", "revenue", "profit", "earnings",
+    "pricing", "fare", "regulation", "license", "licence", "compliance", "policy",
+    "product", "feature", "safety", "ev", "electric", "autonomous", "robotaxi"
+]
+
+def text_of(a):
+    return f"{a.get('title','')} {a.get('description','')} {a.get('url','')}".lower()
+
+def has_any(text, keywords):
+    return any(k in text for k in keywords)
+
+def tag_companies(a):
+    txt = text_of(a)
+    tags = []
+    for cname, patterns in COMPANY_PATTERNS.items():
+        for pat in patterns:
+            if re.search(pat, txt, flags=re.I):
+                tags.append(cname)
+                break
+    return tags
+
+def is_business_relevant(a):
+    t = text_of(a)
+    if has_any(t, VIOLENCE_BLACKLIST):
+        return False
+    # allow everything else; NewsAPI query already biases to biz topics
+    return True
+
 def merge_dedupe(articles):
     seen = set()
     out = []
@@ -161,27 +204,60 @@ def merge_dedupe(articles):
             continue
         seen.add(key)
         out.append(a)
-    # newest first, cap to 60 (token budget)
     out.sort(key=lambda x: x.get("published_at") or "", reverse=True)
-    return out[:60]
+    return out
+
+def limit_per_company(articles, max_per=7):
+    counts = {c: 0 for c in COMPANIES}
+    selected = []
+    for a in articles:
+        tags = a.get("companies") or []
+        # If no tags, keep it but don't count towards a company cap
+        if not tags:
+            selected.append(a)
+            continue
+        # apply cap per any tagged company
+        if any(counts.get(c, 0) >= max_per for c in tags):
+            continue
+        # increment counts for all tagged companies
+        for c in tags:
+            if c in counts:
+                counts[c] += 1
+        selected.append(a)
+    return selected
 
 def fetch_articles(from_iso: str, to_iso: str):
     arts = []
-    # NewsAPI
     try:
         arts += fetch_news(from_iso, to_iso)
     except Exception:
         pass
-    # RSS fallback (UTC window)
     try:
         from_dt_utc = datetime.fromisoformat(from_iso + "T00:00:00+00:00")
         to_dt_utc   = datetime.fromisoformat(to_iso   + "T23:59:59+00:00")
         arts += fetch_google_news_rss(from_dt_utc, to_dt_utc)
     except Exception:
         pass
-    return merge_dedupe(arts)
 
-# --- Post-processor: inline links if model ever outputs URL on next line ---
+    arts = merge_dedupe(arts)
+
+    # classify companies, filter out violent/personal incidents
+    filtered = []
+    for a in arts:
+        if not is_business_relevant(a):
+            continue
+        a["companies"] = tag_companies(a)
+        filtered.append(a)
+
+    # enforce per-company cap
+    capped = limit_per_company(filtered, max_per=7)
+
+    # cap overall size to protect tokens
+    capped = capped[:80]
+
+    return capped
+
+# --- INLINE LINK SAFETY (kept, just in case) ---
 def inline_bullet_links(text: str) -> str:
     """
     Converts:
@@ -217,30 +293,29 @@ def inline_bullet_links(text: str) -> str:
 def chatgpt_brief(coverage_start_disp, coverage_end_disp, articles):
     system = "You are a concise industry analyst for ride-hailing."
 
+    # We pass company tags so the model can print the company at end of each item.
     user = f"""
 Generate a weekly competitor news brief for ride-hailing. Companies: Uber, DiDi (滴滴), Bolt, inDrive, Cabify, Yassir, Heetch, Grab, Gojek.
 
 Coverage Window: {coverage_start_disp} – {coverage_end_disp}
 
 Use ONLY the articles in the JSON array below. Do not invent links. Remove duplicates.
-If there are very few items, fewer than 15 is fine.
+Prioritize business-relevant items: launches, new cities/countries, expansion, partnerships, M&A, funding/financing, pricing/regulatory changes, product/feature rollouts, EV/AV/robotaxi.
+Avoid personal violent incidents (e.g., assault, murder). Regulatory/antitrust cases are allowed.
 
-ARTICLES (JSON array):
+ARTICLES (JSON array; each item may include a "companies" array with detected tags):
 {json.dumps(articles, ensure_ascii=False)}
 
 Output EXACTLY:
 
-<b>📌 Title:</b>
-Weekly Competitor Brief — {coverage_end_disp}
-
-<b>📌 Coverage Window:</b>
-{coverage_start_disp} – {coverage_end_disp}
+<b>📌 Weekly Competitor Brief — {coverage_end_disp}</b>
 
 <b>📌 Top 15</b>
 - Select up to 15 important, unique items from the article list (aim for 15 if available; fewer is OK if there aren’t enough credible items).
-- If a company has no coverage, omit it (do NOT add a “no news” line).
-- Each item must be a single line using HTML link format (no separate "Link" line, no Markdown):
-  ➡️ <a href="URL">News in one sentence</a> — Source
+- Limit to at most 7 items per single company in this section.
+- Each item must be ONE line using HTML link format (no raw URLs, no Markdown), and end with the company tag:
+  ➡️ <a href="URL">News in one sentence</a> — Source — Company
+  (If multiple companies apply, join with "/" — e.g., Uber/Grab)
 
 <b>📌 Trend Takeaway</b>
 One sentence capturing the dominant theme of the week.
@@ -306,12 +381,14 @@ def main():
     cov_start_disp, cov_end_disp = to_display(cov_start), to_display(cov_end)
 
     articles = fetch_articles(cov_start_iso, cov_end_iso)
-    print(f"Coverage: {cov_start_disp} – {cov_end_disp} | Articles fetched: {len(articles)}")
+
+    # Debug log to Actions
+    print(f"Coverage: {cov_start_disp} – {cov_end_disp} | Articles fetched (pre-model): {len(articles)}")
 
     brief = chatgpt_brief(cov_start_disp, cov_end_disp, articles)
-    brief = inline_bullet_links(brief)  # safety: convert any stray raw URLs into inline anchors
+    brief = inline_bullet_links(brief)  # safety
 
-    # Send as a single message (chunked if over Telegram limit)
+    # One message (chunked if too long)
     tg_send_text(brief.strip())
 
 if __name__ == "__main__":
