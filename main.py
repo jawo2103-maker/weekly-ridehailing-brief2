@@ -24,13 +24,13 @@ def fetch_news(from_iso: str, to_iso: str):
     if not NEWSAPI_KEY:
         return []
     url = "https://newsapi.org/v2/everything"
-   q = (
-  '("Uber" OR "Uber Technologies" OR "DiDi" OR "Didi Chuxing" OR 滴滴 OR '
-  '"Bolt" OR "Taxify" OR "inDrive" OR "inDriver" OR "Cabify" OR "Yassir" OR "Heetch") '
-  'AND (ride OR driver OR mobility OR taxi OR regulation OR pricing OR safety OR expansion '
-  'OR partnership OR investment OR funding OR strike)'
-  ' OR ("Grab" OR "Gojek")'  # looser branch to capture broader SEA reporting
-)
+    q = (
+        '("Uber" OR "Uber Technologies" OR "DiDi" OR "Didi Chuxing" OR 滴滴 OR '
+        '"Bolt" OR "Taxify" OR "inDrive" OR "inDriver" OR "Cabify" OR "Yassir" OR "Heetch") '
+        'AND (ride OR driver OR mobility OR taxi OR regulation OR pricing OR safety OR expansion '
+        'OR partnership OR investment OR funding OR strike)'
+        ' OR ("Grab" OR "Gojek")'
+    )
     params = {
         "q": q,
         "from": from_iso,
