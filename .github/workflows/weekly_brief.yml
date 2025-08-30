@@ -1,0 +1,33 @@
+name: Weekly Ride-hailing Brief to Telegram
+
+on:
+  schedule:
+    # 06:00 UTC = 09:00 in Helsinki during summer time (DST).
+    # In winter, change to 07:00 UTC for 09:00 Helsinki.
+    - cron: "0 6 * * MON"
+  workflow_dispatch: {}  # allows you to trigger manually too
+
+jobs:
+  run-brief:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run weekly brief
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}  # optional
+        run: python main.py
