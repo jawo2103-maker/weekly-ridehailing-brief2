@@ -75,20 +75,20 @@ ARTICLES (JSON array):
 
 Output structure EXACTLY:
 
-Title:
+<b>📌 Title:</b>
 Weekly Competitor Brief — {coverage_end_disp}
 
-Coverage Window:
+<b>📌 Coverage Window:</b>
 {coverage_start_disp} – {coverage_end_disp}
 
-Top 10
+<b>📌 Top 10</b>
 - Select the 10 most important, unique items from the article list.
 - If a company has no coverage that week, simply omit them from the Top 10 (do NOT add a line saying "no significant news").
 - Each item must be exactly two lines:
   News in one sentence — Source
   Link
 
-Trend Takeaway
+<b>📌 Trend Takeaway</b>
 One sentence capturing the dominant theme of the week.
 
 Rules:
