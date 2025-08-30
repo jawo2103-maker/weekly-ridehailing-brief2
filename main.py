@@ -22,12 +22,9 @@ COMPANY_PATTERNS = {
 }
 COMPANIES = list(COMPANY_PATTERNS.keys())
 
-# A few aggregator domains (we still allow them; we just prefer non-aggregators when de-duping)
+# Aggregators are allowed, but we prefer original outlets when de-duping
 AGGREGATOR_DOMAINS = {
-    "biztoc.com",
-    "news.google.com",
-    "news.yahoo.com", "finance.yahoo.com",
-    "flipboard.com",
+    "biztoc.com", "news.google.com", "news.yahoo.com", "finance.yahoo.com", "flipboard.com"
 }
 
 # --- TIME / COVERAGE ---
@@ -39,10 +36,6 @@ def helsinki_now():
         return datetime.utcnow().replace(tzinfo=timezone.utc) + timedelta(hours=3)
 
 def last_full_week_mon_sun(now_local: datetime):
-    """
-    Most recent FULL Monday–Sunday week BEFORE 'today' local date.
-    If today is Monday, last week ended yesterday (Sunday).
-    """
     today = now_local.date()
     wd = today.weekday()  # Mon=0..Sun=6
     last_sun = today - timedelta(days=wd + 1)
@@ -52,13 +45,12 @@ def last_full_week_mon_sun(now_local: datetime):
 def to_display(d): return d.strftime("%d/%m/%Y")
 def to_iso(d):     return d.strftime("%Y-%m-%d")
 
-# --- FETCH: NewsAPI (if key present) ---
+# --- FETCH: NewsAPI (multilingual; if key present) ---
 def fetch_news(from_iso: str, to_iso: str):
     if not NEWSAPI_KEY:
         return []
     url = "https://newsapi.org/v2/everything"
-    # Strict for most brands + looser branch for Grab/Gojek to catch SEA items.
-    # Multilingual (no 'language' param).
+    # Strict for most brands + looser branch for Grab/Gojek to catch SEA items. Multilingual (no 'language' param).
     q = (
         '("Uber" OR "Uber Technologies" OR "DiDi" OR "Didi Chuxing" OR 滴滴 OR '
         '"Bolt" OR "Taxify" OR "inDrive" OR "inDriver" OR "Cabify" OR "Yassir" OR "Heetch") '
@@ -96,25 +88,19 @@ def fetch_news(from_iso: str, to_iso: str):
         })
     return out
 
-# --- FETCH: Google News RSS (no key). Requires 'feedparser' in workflow. ---
+# --- FETCH: Google News RSS (no key; requires feedparser) ---
 def fetch_google_news_rss(from_dt_utc, to_dt_utc):
     try:
         import feedparser  # type: ignore
     except Exception:
         return []
-
     results = []
-    # SEA/Africa/EU/LatAm broad locales
+    # SEA/Africa/EU/LatAm/India
     locales = [
-        ("en-SG", "SG"),  # Singapore
-        ("en-ID", "ID"),  # Indonesia
-        ("en-GB", "GB"),
-        ("en-ZA", "ZA"),
-        ("en-KE", "KE"),
-        ("en-NG", "NG"),
-        ("es-ES", "ES"),
-        ("pt-BR", "BR"),
-        ("fr-FR", "FR"),
+        ("en-SG", "SG"), ("en-ID", "ID"), ("en-GB", "GB"), ("en-IN", "IN"),
+        ("en-ZA", "ZA"), ("en-KE", "KE"), ("en-NG", "NG"),
+        ("es-ES", "ES"), ("es-MX", "MX"), ("es-CO", "CO"),
+        ("pt-BR", "BR"), ("fr-FR", "FR"), ("fr-MA", "MA"),
         ("ru-RU", "RU"),
     ]
     base = "https://news.google.com/rss/search?q={query}%20when:7d&hl={hl}&gl={gl}&ceid={gl}:{hl_code}"
@@ -151,7 +137,6 @@ def fetch_google_news_rss(from_dt_utc, to_dt_utc):
                 title = (getattr(e, "title", "") or "").strip()
                 if not link or not title:
                     continue
-                # source
                 src = None
                 src_tag = getattr(e, "source", None)
                 if src_tag and hasattr(src_tag, "title"):
@@ -168,13 +153,32 @@ def fetch_google_news_rss(from_dt_utc, to_dt_utc):
                     "url": link,
                     "description": "",
                 })
-            time.sleep(0.1)  # polite pause
+            time.sleep(0.1)
     return results
 
 # --- CLASSIFY & FILTER ---
-VIOLENCE_BLACKLIST = [
+INCIDENT_BLACKLIST = [
+    # accidents/crimes/personal incidents
     "assault", "punched", "punch", "stab", "stabbing", "murder", "killed", "kill",
     "rape", "sexual assault", "molest", "robbery", "beaten", "beating",
+    "accident", "crash", "collision", "injured", "injury", "fatal", "death", "dead",
+    "explosion", "fire", "shooting", "homicide",
+]
+
+STUDY_REPORT_TERMS = [
+    "study", "studies", "research", "report", "whitepaper", "survey", "analysis",
+    "finds", "reveals", "indicates"
+]
+
+COMMERCIAL_WHITELIST = [
+    "launch", "expansion", "expand", "opens", "opening", "enters", "entry", "rollout",
+    "city", "cities", "country", "countries", "region", "market",
+    "merger", "acquisition", "acquires", "m&a", "deal", "contract",
+    "funding", "raises", "raise", "investment", "invests", "round",
+    "partnership", "partners", "alliance", "collaboration",
+    "ipo", "listing", "valuation", "revenue", "profit", "earnings",
+    "pricing", "fare", "regulation", "license", "licence", "permit", "approval",
+    "product", "feature", "safety feature", "ev", "electric", "autonomous", "robotaxi"
 ]
 
 def text_of(a):
@@ -195,9 +199,12 @@ def tag_companies(a):
 
 def is_business_relevant(a):
     t = text_of(a)
-    if has_any(t, VIOLENCE_BLACKLIST):
+    # Exclude incidents & personal-violence items
+    if has_any(t, INCIDENT_BLACKLIST):
         return False
-    # Keep other topics; fetching already biases toward business items.
+    # Exclude generic studies/reports unless there is a commercial/regulatory action
+    if has_any(t, STUDY_REPORT_TERMS) and not has_any(t, COMMERCIAL_WHITELIST):
+        return False
     return True
 
 def domain_of(url):
@@ -212,56 +219,37 @@ def norm_title(s):
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-def similar(a, b, threshold=0.86):
+def similar(a, b, threshold=0.80):
     return SequenceMatcher(None, a, b).ratio() >= threshold
 
-def sort_authority_first(arts):
-    # Prefer non-aggregators; then newer items
-    def key(a):
-        d = domain_of(a.get("url",""))
-        is_agg = 1 if d in AGGREGATOR_DOMAINS else 0
-        ts = a.get("published_at") or ""
-        # Non-aggregator (0) sorts before aggregator (1); then by published desc
-        return (is_agg, -int("".join(filter(str.isdigit, ts)) or "0"))
-    # Can't convert ts reliably to int for all formats; we will just return is_agg only.
-    # But to keep a stable result, we'll do a two-step: non-agg first; then preserve original order.
-    non_agg = [a for a in arts if domain_of(a.get("url","")) not in AGGREGATOR_DOMAINS]
-    agg     = [a for a in arts if domain_of(a.get("url","")) in AGGREGATOR_DOMAINS]
-    return non_agg + agg
-
 def merge_dedupe_with_similarity(articles):
-    # Prefer non-aggregators first
-    articles = sort_authority_first(articles)
+    # Prefer non-aggregators first, then newest-ish order (we don't enforce strict date sort here)
+    non_agg = [a for a in articles if domain_of(a.get("url","")) not in AGGREGATOR_DOMAINS]
+    agg     = [a for a in articles if domain_of(a.get("url","")) in AGGREGATOR_DOMAINS]
+    ordered = non_agg + agg
 
     kept = []
-    seen_keys = set()
-
-    for a in articles:
+    for a in ordered:
         url = (a.get("url") or "").split("?")[0].rstrip("/")
         title = (a.get("title") or "").strip()
         tnorm = norm_title(title)
 
-        key = url or tnorm
-        if key in seen_keys:
-            continue
-
+        # Drop if essentially duplicate of a kept item (by URL or by similar title)
         dup = False
         for b in kept:
             burl = (b.get("url") or "").split("?")[0].rstrip("/")
             btitle = (b.get("title") or "").strip()
             btnorm = norm_title(btitle)
-            # If same domain and titles very similar OR titles just very similar overall, treat as dup
-            if domain_of(url) == domain_of(burl) and similar(tnorm, btnorm, 0.83):
+            # Same-domain near-duplicate (looser threshold)
+            if domain_of(url) == domain_of(burl) and similar(tnorm, btnorm, 0.75):
                 dup = True; break
-            if similar(tnorm, btnorm, 0.90):
+            # Cross-domain near-duplicate
+            if similar(tnorm, btnorm, 0.85):
                 dup = True; break
         if dup:
             continue
 
-        seen_keys.add(key)
         kept.append(a)
-
-    # newest-first order is already approximate; keep current
     return kept
 
 def limit_per_company(articles, max_per=7):
@@ -269,14 +257,11 @@ def limit_per_company(articles, max_per=7):
     selected = []
     for a in articles:
         tags = a.get("companies") or []
-        # If no tags, keep it without affecting caps
         if not tags:
-            selected.append(a)
+            # drop items without a known company tag to avoid model guessing
             continue
-        # Skip if any tagged company already reached cap
         if any(counts.get(c, 0) >= max_per for c in tags):
             continue
-        # Increment caps for tagged companies
         for c in tags:
             if c in counts:
                 counts[c] += 1
@@ -298,8 +283,7 @@ def fetch_articles(from_iso: str, to_iso: str):
     except Exception:
         pass
 
-    # Classify, filter, dedupe
-    # 1) business filter + tag companies
+    # Filter business relevance & tag companies
     filtered = []
     for a in arts:
         if not is_business_relevant(a):
@@ -307,66 +291,125 @@ def fetch_articles(from_iso: str, to_iso: str):
         a["companies"] = tag_companies(a)
         filtered.append(a)
 
-    # 2) stronger dedupe (URL + fuzzy titles, prefer non-aggregators)
+    # Stronger de-dup
     filtered = merge_dedupe_with_similarity(filtered)
 
-    # 3) enforce per-company cap
+    # Enforce per-company cap BEFORE model
     capped = limit_per_company(filtered, max_per=7)
 
-    # 4) cap overall to protect tokens
-    capped = capped[:100]
-    return capped
+    # Protect tokens
+    return capped[:120]
 
-# --- INLINE LINK SAFETY (kept, just in case) ---
-def inline_bullet_links(text: str) -> str:
+# --- OUTPUT POST-PROCESS (extra safety) ---
+ANCHOR_RE = re.compile(r'<a href="([^"]+)">', re.IGNORECASE)
+
+def fix_bullet_prefixes(text: str) -> str:
+    # Replace any leading "- ➡️" with "➡️ "
+    lines = text.splitlines()
+    for i, ln in enumerate(lines):
+        s = ln.lstrip()
+        if s.startswith("- ➡️"):
+            # keep original left-space indentation minimal; produce canonical
+            lines[i] = "➡️ " + s[len("- ➡️"):].lstrip()
+    return "\n".join(lines)
+
+def dedupe_output_bullets(text: str) -> str:
+    lines = text.splitlines()
+    out, seen_urls = [], set()
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("➡️"):
+            m = ANCHOR_RE.search(s)
+            if m:
+                url = m.group(1)
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+        out.append(ln)
+    return "\n".join(out)
+
+def enforce_output_company_cap(text: str, max_per=7) -> str:
     """
-    Converts:
-      ➡️ Headline — Source
-      https://example.com
-    into:
-      ➡️ <a href="https://example.com">Headline</a> — Source
-    Also converts [text](url) to HTML anchors.
+    Inside the Top 15 block, ensure no company exceeds cap.
+    We detect company tags at the end of the line: " — Source — Company[/Company]"
+    Excess bullets (beyond cap) are dropped from the end-first.
     """
     lines = text.splitlines()
-    out = []
-    i = 0
-    url_re = re.compile(r'^https?://\S+$')
-    md_re  = re.compile(r'\[([^\]]+)\]\((https?://[^)]+)\)')
+    # locate Top block by headers/separators
+    try:
+        top_idx = next(i for i, ln in enumerate(lines) if ln.strip().startswith("<b>📌 Top"))
+    except StopIteration:
+        return text
+    try:
+        # Top block ends at next separator "––––" or Trend header
+        end_idx = next(i for i, ln in enumerate(lines[top_idx+1:], start=top_idx+1)
+                       if ln.strip() == "––––" or ln.strip().startswith("<b>📌 Trend"))
+    except StopIteration:
+        end_idx = len(lines)
 
-    while i < len(lines):
-        line = md_re.sub(r'<a href="\2">\1</a>', lines[i])
-        if line.strip().startswith('➡️') and i + 1 < len(lines) and url_re.match(lines[i+1].strip()):
-            url = lines[i+1].strip()
-            if ' — ' in line:
-                head, tail = line.split(' — ', 1)
-                bullet = '➡️ '
-                headline = head[len(bullet):].strip() if head.startswith(bullet) else head.strip()
-                line = f'➡️ <a href="{url}">{headline}</a> — {tail}'
-                i += 2
-                out.append(line)
+    company_counts = {c: 0 for c in COMPANIES}
+    new_section = []
+    for i in range(top_idx+1, end_idx):
+        ln = lines[i]
+        s = ln.strip()
+        if not s.startswith("➡️"):
+            new_section.append(ln)
+            continue
+        # extract company label after last " — "
+        parts = s.split(" — ")
+        if len(parts) < 3:
+            # malformed; keep but don't count
+            new_section.append(ln)
+            continue
+        comp_field = parts[-1]
+        comps = [c.strip() for c in comp_field.split("/") if c.strip()]
+        # If company unknown, drop (avoid guessing)
+        if not any(c in COMPANIES for c in comps):
+            continue
+        # Enforce caps
+        over = any(company_counts.get(c, 0) >= max_per for c in comps if c in COMPANIES)
+        if over:
+            continue
+        for c in comps:
+            if c in company_counts:
+                company_counts[c] += 1
+        new_section.append(ln)
+
+    # rebuild text
+    rebuilt = lines[:top_idx+1] + new_section + lines[end_idx:]
+    return "\n".join(rebuilt)
+
+def filter_out_incident_and_study_bullets(text: str) -> str:
+    """Extra safety on final text: drop bullets that look like incidents or generic studies."""
+    lines = text.splitlines()
+    out = []
+    for ln in lines:
+        s = ln.strip().lower()
+        if s.startswith("➡️"):
+            # incident filter
+            if any(k in s for k in INCIDENT_BLACKLIST):
                 continue
-        out.append(line)
-        i += 1
+            # study/report filter unless commercial whitelist present
+            if any(k in s for k in STUDY_REPORT_TERMS) and not any(k in s for k in COMMERCIAL_WHITELIST):
+                continue
+        out.append(ln)
     return "\n".join(out)
 
 # --- FIT TO ONE TELEGRAM MESSAGE ---
 def truncate_to_one_message(text: str, hard_limit=4096):
     """
-    Ensures a single Telegram message:
-    1) If text <= limit, return as is.
-    2) Else, progressively shorten anchor inner text for bullets.
-    3) If still too long, drop bullets from the end until it fits.
+    Single Telegram message guarantee:
+    1) If <= limit, return as is.
+    2) Shrink anchor headline text for bullets progressively.
+    3) If still long, drop bullets from the end.
     """
     if len(text) <= hard_limit:
         return text
 
     lines = text.splitlines()
-    # Identify bullet lines (start with '➡️ ')
     bullet_idx = [i for i, ln in enumerate(lines) if ln.strip().startswith('➡️ ')]
 
-    # Step 1: shrink anchor inner text on bullets
     def shrink_line(line, max_head_len):
-        # Find anchor <a href="...">HEADLINE</a>
         m = re.search(r'(<a href="[^"]+">)(.+?)(</a>)(\s+—\s+.+)$', line)
         if not m:
             return line
@@ -382,9 +425,8 @@ def truncate_to_one_message(text: str, hard_limit=4096):
             lines[i] = shrink_line(lines[i], max_len)
         max_len -= 10
 
-    # Step 2: drop bullets from the end if still too long
     while len("\n".join(lines)) > hard_limit and bullet_idx:
-        drop_i = bullet_idx.pop()  # last bullet
+        drop_i = bullet_idx.pop()  # drop last bullet
         lines.pop(drop_i)
 
     return "\n".join(lines)
@@ -397,8 +439,9 @@ def chatgpt_brief(coverage_end_disp, articles):
 Generate a weekly competitor news brief for ride-hailing. Companies: Uber, DiDi (滴滴), Bolt, inDrive, Cabify, Yassir, Heetch, Grab, Gojek.
 
 Use ONLY the articles in the JSON array below. Do not invent links. Remove duplicates before writing.
-Prioritize business-relevant items: launches, new cities/countries, expansion, partnerships, M&A, funding/financing, pricing/regulatory changes, product/feature rollouts, EV/AV/robotaxi.
-Avoid personal violent incidents (e.g., assault, murder). Regulatory/antitrust cases are allowed.
+Include only commercial/strategic items: launches, new cities/countries, expansion, partnerships, M&A, funding/financing, pricing/regulatory changes, product/feature rollouts, EV/AV/robotaxi.
+Exclude accidents, crimes, and personal incidents. Exclude generic studies/reports unless they announce a specific commercial/regulatory action.
+Use the provided "companies" tags for the Company label; do NOT guess. If an item has no company tag, skip it.
 
 ARTICLES (JSON array; each item may include a "companies" array with detected tags):
 {json.dumps(articles, ensure_ascii=False)}
@@ -408,17 +451,17 @@ Output EXACTLY:
 <b>📌 Weekly Competitor Brief — {coverage_end_disp}</b>
 ––––
 <b>📌 Top 15</b>
-- Select up to 15 important, unique items from the article list (aim for 15 if available; fewer is OK if there aren’t enough credible items).
-- Limit to at most 7 items per single company in this section.
-- Each item must be ONE line using HTML link format (no raw URLs, no Markdown), and end with the company tag:
+- Select up to 15 important, unique items (aim for 15; fewer is OK if not enough credible items).
+- Do NOT exceed 7 items for any single company.
+- Each item must be ONE line using HTML link format (no raw URLs, no Markdown), and end with the company tag(s):
   ➡️ <a href="URL">News in one sentence</a> — Source — Company
   (If multiple companies apply, join with "/" — e.g., Uber/Grab)
 ––––
 <b>📌 Trend Takeaway</b>
-One sentence capturing the dominant theme of the week.
+One sentence capturing the dominant theme of the week; reference at least two different companies from Top 15.
 
 Rules:
-- Prefer original/authoritative outlets when duplicates exist, but aggregators (e.g., Biztoc) are allowed if that is the only or timeliest available link.
+- Prefer original/authoritative outlets when duplicates exist; aggregators (e.g., Biztoc) are allowed if they are the only or timeliest link.
 - Do not invent links.
 - Keep headlines one sentence and neutral.
 - Use the exact URLs from the JSON (no shortening or changing domains).
@@ -445,7 +488,6 @@ Rules:
 TG_API = "https://api.telegram.org/bot{token}/{method}"
 
 def tg_send_text_single(text: str):
-    # Always send AS ONE MESSAGE (after truncation if needed)
     r = requests.post(
         TG_API.format(token=TELEGRAM_BOT_TOKEN, method="sendMessage"),
         json={
@@ -463,14 +505,21 @@ def main():
     now_local = helsinki_now()
     cov_start, cov_end = last_full_week_mon_sun(now_local)
     cov_start_iso, cov_end_iso = to_iso(cov_start), to_iso(cov_end)
-    cov_end_disp = to_display(cov_end)  # date in title only
+    cov_end_disp = to_display(cov_end)  # date for title
 
     articles = fetch_articles(cov_start_iso, cov_end_iso)
     print(f"Coverage: {to_display(cov_start)} – {to_display(cov_end)} | Articles fetched (pre-model): {len(articles)}")
 
+    # Generate brief
     brief = chatgpt_brief(cov_end_disp, articles)
-    brief = inline_bullet_links(brief)              # safety: convert stray URLs to anchors
-    brief = truncate_to_one_message(brief.strip())  # ensure a single Telegram message
+
+    # Output safeties
+    brief = fix_bullet_prefixes(brief)                 # ensure bullets use "➡️ " only
+    brief = dedupe_output_bullets(brief)               # remove duplicate URL bullets
+    brief = enforce_output_company_cap(brief, 7)       # enforce max 7 per company in final list
+    brief = filter_out_incident_and_study_bullets(brief)  # drop any stray incident/study bullets
+    # (Model already asked to inline anchors; keep fallback just in case)
+    brief = truncate_to_one_message(brief.strip())     # ensure single Telegram message
 
     tg_send_text_single(brief)
 
