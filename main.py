@@ -82,9 +82,11 @@ Coverage Window:
 {coverage_start_disp} – {coverage_end_disp}
 
 Top 10
-Each item on two lines:
-News in one sentence — Source
-Link
+- Select the 10 most important, unique items from the article list.
+- If a company has no coverage that week, simply omit them from the Top 10 (do NOT add a line saying "no significant news").
+- Each item must be exactly two lines:
+  News in one sentence — Source
+  Link
 
 Trend Takeaway
 One sentence capturing the dominant theme of the week.
