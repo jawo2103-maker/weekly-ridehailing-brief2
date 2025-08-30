@@ -86,11 +86,6 @@ Each item on two lines:
 News in one sentence — Source
 Link
 
-Appendix
-Grouped by Company → Topic → Region. Each item on two lines:
-News in one sentence — Source
-Link
-
 Trend Takeaway
 One sentence capturing the dominant theme of the week.
 
