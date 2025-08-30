@@ -139,7 +139,7 @@ def main():
     cov_start_iso, cov_end_iso = to_iso(cov_start), to_iso(cov_end)
     cov_start_disp, cov_end_disp = to_display(cov_start), to_display(cov_end)
 
-    articles = fetch_articles(cov_start_iso, cov_end_iso)
+    articles = fetch_news(cov_start_iso, cov_end_iso)   # or fetch_newsapi(...)
 
     # generate the brief
     brief = chatgpt_brief(cov_start_disp, cov_end_disp, articles)
