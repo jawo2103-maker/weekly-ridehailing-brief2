@@ -84,9 +84,10 @@ Weekly Competitor Brief — {coverage_end_disp}
 <b>📌 Top 10</b>
 - Select the 10 most important, unique items from the article list.
 - If a company has no coverage that week, simply omit them from the Top 10 (do NOT add a line saying "no significant news").
-- Each item must be exactly two lines:
-  News in one sentence — Source
-  Link
+- Each item must be formatted with this exact structure:
+
+➡️ News in one sentence — Source  
+Link
 
 <b>📌 Trend Takeaway</b>
 One sentence capturing the dominant theme of the week.
