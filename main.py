@@ -84,10 +84,13 @@ Weekly Competitor Brief — {coverage_end_disp}
 <b>📌 Top 10</b>
 - Select the 10 most important, unique items from the article list.
 - If a company has no coverage that week, simply omit them from the Top 10 (do NOT add a line saying "no significant news").
-- Each item must be formatted with this exact structure:
+- Each item must be a single line using HTML link format (no separate "Link" line, no Markdown):
+  ➡️ <a href="URL">News in one sentence</a> — Source
 
-➡️ News in one sentence — Source  
-Link
+Rules for links:
+- Use ONLY <a href="...">…</a> HTML anchors (no [Link](...) markdown).
+- Do not include raw URLs in the text.
+- Keep the sentence concise and neutral.
 
 <b>📌 Trend Takeaway</b>
 One sentence capturing the dominant theme of the week.
