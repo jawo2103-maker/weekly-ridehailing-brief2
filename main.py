@@ -138,14 +138,15 @@ def main():
     cov_start, cov_end = last_full_week_mon_sun(now_hki)
     cov_start_iso, cov_end_iso = to_iso(cov_start), to_iso(cov_end)
     cov_start_disp, cov_end_disp = to_display(cov_start), to_display(cov_end)
-    articles = fetch_news(cov_start_iso, cov_end_iso)  # [] is fine
+
+    articles = fetch_articles(cov_start_iso, cov_end_iso)
+
+    # generate the brief
     brief = chatgpt_brief(cov_start_disp, cov_end_disp, articles)
-if "### Appendix" in brief:
-    head, appendix = brief.split("### Appendix", 1)
-    tg_send_text(head.strip())
-    tg_send_text("### Appendix" + appendix.strip())
-else:
+
+    # send the whole thing as ONE message
     tg_send_text(brief.strip())
+
 
 if __name__ == "__main__":
     main()
