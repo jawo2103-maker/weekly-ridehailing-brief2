@@ -24,11 +24,13 @@ def fetch_news(from_iso: str, to_iso: str):
     if not NEWSAPI_KEY:
         return []
     url = "https://newsapi.org/v2/everything"
-    q = ('("Uber" OR "Uber Technologies" OR "DiDi" OR "Didi Chuxing" OR 滴滴 OR '
-         '"Bolt" OR "Taxify" OR "inDrive" OR "inDriver" OR "Cabify" OR "Yassir" OR '
-         '"Heetch" OR "Grab" OR "Gojek") AND '
-         '(ride OR driver OR mobility OR taxi OR regulation OR pricing OR safety OR expansion '
-         'OR partnership OR investment OR funding OR strike)')
+   q = (
+  '("Uber" OR "Uber Technologies" OR "DiDi" OR "Didi Chuxing" OR 滴滴 OR '
+  '"Bolt" OR "Taxify" OR "inDrive" OR "inDriver" OR "Cabify" OR "Yassir" OR "Heetch") '
+  'AND (ride OR driver OR mobility OR taxi OR regulation OR pricing OR safety OR expansion '
+  'OR partnership OR investment OR funding OR strike)'
+  ' OR ("Grab" OR "Gojek")'  # looser branch to capture broader SEA reporting
+)
     params = {
         "q": q,
         "from": from_iso,
@@ -81,9 +83,9 @@ Weekly Competitor Brief — {coverage_end_disp}
 <b>📌 Coverage Window:</b>
 {coverage_start_disp} – {coverage_end_disp}
 
-<b>📌 Top 10</b>
-- Select the 10 most important, unique items from the article list.
-- If a company has no coverage that week, simply omit them from the Top 10 (do NOT add a line saying "no significant news").
+<b>📌 Top 15</b>
+- Select up to 15 important, unique items from the article list (aim for 15 if available; fewer is OK if there aren’t enough credible items).
+- If a company has no coverage that week, omit it (do NOT add a “no news” line).
 - Each item must be a single line using HTML link format (no separate "Link" line, no Markdown):
   ➡️ <a href="URL">News in one sentence</a> — Source
 
@@ -97,9 +99,12 @@ One sentence capturing the dominant theme of the week.
 
 Rules:
 - No “Impact” scores.
+- Prefer original/authoritative outlets when duplicates exist, but aggregators (e.g., Biztoc) are allowed if that is the only or timeliest available link.
+- Do not invent links.
 - Keep headlines one sentence and neutral.
-- Use real, working links (exact URLs provided if ARTICLES non-empty).
-- If a company has no credible articles in the window, state that.
+- Use the exact URLs from the JSON (no shortening or changing domains).
+- If a company has no credible items for the window, omit it from Top 15 (do NOT write “no significant news”).
+
 """
     payload = {
         "model": "gpt-4o-mini",
